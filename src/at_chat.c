@@ -1112,6 +1112,9 @@ static void *at_core_malloc(unsigned int nbytes)
         return NULL;
     }
     unsigned long *mem_info = (unsigned long *)at_malloc(nbytes + sizeof(unsigned long));
+    if (mem_info == NULL) {
+        return NULL;
+    }
     *mem_info = nbytes;
     at_cur_mem += (nbytes + sizeof(unsigned long) ); //Statistics of current memory usage.
     if (at_cur_mem > at_max_mem) { //Record maximum memory usage.

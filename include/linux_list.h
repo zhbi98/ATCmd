@@ -18,7 +18,7 @@
  *
  */
 
-#if !defined(__GNUC__)
+#if !defined(__GNUC__) || defined(__ARMCC_VERSION)
 #define container_of(ptr, type, member) ( \
 	(type *)( (char *)(ptr) - offsetof(type,member) ))
 #else
