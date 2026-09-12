@@ -1,9 +1,0 @@
-{
-    "makefile.launchConfigurations": [
-        {
-            "cwd": "${workspaceFolder}/samples/linux/output",
-            "binaryPath": "${workspaceFolder}/samples/linux/output/demo",
-            "binaryArgs": []
-        }
-    ]
-}

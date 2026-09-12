@@ -1,4 +1,5 @@
 *.pyc
+*.pyd
 *.map
 *.dblite
 *.elf
@@ -38,15 +39,3 @@ GPUCache
 #cscope files
 cscope.*
 ncscope.*
-
-#ctag files
-/samples/linux/output/*
-
-/samples/none_os/iar/Debug/*
-/samples/none_os/iar/settings/*
-
-/samples/none_os/mdk/Debug
-/samples/none_os/mdk/list
-/samples/none_os/mdk/obj
-/samples/none_os/mdk/DebugConfig
-
