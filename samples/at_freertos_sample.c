@@ -1,17 +1,19 @@
 /**
  * @file at_freertos_sample.c
  * Connect the FreeRTOS tick and polling task to the AT device examples.
- * Compile with the four embedded examples and the application UART driver.
+ * Adapt the tick hook and task body to the existing application.
  */
 
 /*********************
  *      INCLUDES
  *********************/
 
-#include "at_device_sample.h"
+#include "at_chat.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
+
+#include <stdint.h>
 
 /*********************
  *      DEFINES
@@ -19,23 +21,14 @@
 
 #define AT_TASK_POLL_MS 5U
 
-#if configUSE_TICK_HOOK != 1
-#error "Enable configUSE_TICK_HOOK in FreeRTOSConfig.h"
-#endif
-
-#if configUSE_TICKLESS_IDLE != 0
-#error "This tick-hook example requires configUSE_TICKLESS_IDLE == 0"
-#endif
+/**
+ * FreeRTOSConfig.h: configUSE_TICK_HOOK = 1, configUSE_TICKLESS_IDLE = 0.
+ * Enable INCLUDE_vTaskDelay and INCLUDE_vTaskDelete for the task below.
+ * The at_device_* calls refer to the corresponding device/command snippets.
+ */
 
 /**********************
- * GLOBAL PROTOTYPES
- **********************/
-
-void vApplicationTickHook(void);
-void at_freertos_task(void * argument_p);
-
-/**********************
- *   GLOBAL FUNCTIONS
+ *      TICK HOOK
  **********************/
 
 /**
@@ -61,6 +54,10 @@ void vApplicationTickHook(void)
         at_device_tick_inc(elapsed_ms);
     }
 }
+
+/**********************
+ *    POLLING TASK
+ **********************/
 
 /**
  * Own the AT object, request submission and response callbacks in one task.

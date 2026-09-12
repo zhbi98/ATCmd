@@ -7,8 +7,9 @@
  *      INCLUDES
  *********************/
 
-#include "at_device_sample.h"
+#include "at_chat.h"
 
+#include <stdint.h>
 #include <stddef.h>
 
 /*********************
@@ -72,7 +73,7 @@ static uint32_t last_poll_ms = 0;
  * The target must provide an atomic counter read or protect it appropriately;
  * volatile alone does not make a 32-bit access atomic on every processor.
  *
- * The standalone Linux sample uses clock_gettime(CLOCK_MONOTONIC) instead;
+ * The Linux integration snippets use clock_gettime(CLOCK_MONOTONIC) instead;
  * it does not call at_device_tick_inc().
  */
 

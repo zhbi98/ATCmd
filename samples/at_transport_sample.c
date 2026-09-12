@@ -7,8 +7,9 @@
  *      INCLUDES
  *********************/
 
-#include "at_device_sample.h"
+#include "at_chat.h"
 
+#include <stdint.h>
 #include <stddef.h>
 
 /**********************

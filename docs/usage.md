@@ -1,12 +1,12 @@
 # 查询与控制设备
 
-完成[驱动对接](porting.md)后，应用已经拥有一个初始化成功、持续轮询的 AT 对象。本篇从现成的蓝牙查询开始，说明如何提交请求、接收结果，再添加自己的控制指令。
+将[驱动对接](porting.md)中的片段接入应用后，确认 AT 对象初始化成功并持续轮询。本篇从现成的蓝牙查询开始，说明如何提交请求、接收结果，再添加自己的控制指令。
 
 ## 先确认设备的指令格式
 
 框架不会自动选择设备协议。提交前，需要确认命令文本、成功响应、错误标记和响应时间。
 
-[at_commands_sample.c](../samples/at_commands_sample.c) 提供以下接口，声明位于 [at_device_sample.h](../samples/at_device_sample.h)：
+[at_commands_sample.c](../samples/at_commands_sample.c) 展示以下指令接口，按需放入业务模块并在应用头文件中声明：
 
 | 接口 | 发出的命令 | 回调标识 | 超时 / 重试 |
 | --- | --- | --- | --- |
@@ -33,7 +33,9 @@
 在业务事件中调用以下函数，例如设备进入 AT 模式后或用户按下查询按钮时：
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+/* Include the application declarations for the at_device_* snippets. */
 #include <stdio.h>
 
 void app_query_device(void)
@@ -53,10 +55,12 @@ void app_query_device(void)
 
 ## 接收与处理结果
 
-`at_commands_sample.c` 已实现结果回调。以下展示如何修改该文件中的回调来处理业务，不要在其他源文件再定义同名函数。query 使用上表中的回调标识，区分探测、查询和设置请求。
+`at_commands_sample.c` 展示结果回调的处理方式。将所需解析和通知逻辑放入应用业务模块；`query` 使用上表中的回调标识，区分探测、查询和设置请求。
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+/* Include the application declarations for the at_device_* snippets. */
 #include <stdio.h>
 
 void at_device_on_response(const char * query, at_response_t * resp_p)
@@ -83,16 +87,21 @@ void at_device_on_response(const char * query, at_response_t * resp_p)
 取得当前对象，初始化属性，然后填写命令和响应规则。以下以支持 `AT+CSQ` 的设备为例：
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+#include <stddef.h>
+
+/* Include the application declarations for the at_device_* snippets. */
 
 bool app_query_signal(at_callback_t callback)
 {
     at_obj_t * device_p = NULL;
+    at_attr_t attr;
+
     if (!at_device_get_object(&device_p)) {
         return false;
     }
 
-    at_attr_t attr;
     at_attr_deinit(&attr);
     attr.prefix   = "+CSQ:";
     attr.suffix   = "OK";
@@ -112,7 +121,11 @@ bool app_query_signal(at_callback_t callback)
 `at_commands_sample.c` 中的 `at_device_set_baudrate(baudrate)` 演示参数传入、检查和格式化发送：
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+#include <stdint.h>
+
+/* Include the application declarations for the at_device_* snippets. */
 #include <stdio.h>
 
 void app_set_device_baudrate(void)
@@ -132,18 +145,23 @@ void app_set_device_baudrate(void)
 `at_exec_cmd` 按 printf 格式生成命令并复制结果。下面的 `AT+OUTIO` 只演示参数用法，必须替换为目标设备实际支持的控制命令：
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+#include <stddef.h>
+
+/* Include the application declarations for the at_device_* snippets. */
 
 #include <inttypes.h>
 
 bool app_set_output(uint32_t value, at_callback_t callback)
 {
     at_obj_t * device_p = NULL;
+    at_attr_t attr;
+
     if (!at_device_get_object(&device_p)) {
         return false;
     }
 
-    at_attr_t attr;
     at_attr_deinit(&attr);
     attr.cb       = callback;
     attr.timeout  = 1000;
@@ -186,6 +204,6 @@ bool app_set_output(uint32_t value, at_callback_t callback)
 - 设备主动上报状态或数据：注册[URC 处理](advanced-usage.md#urc-消息处理)。
 - 多线程等待结果或转发原始数据：阅读[进阶功能](advanced-usage.md)。
 
-嵌入式例程集中于 `samples` 下的四个 C 文件，不提供固件入口、模拟器或 IDE 工程。把这些文件加入自己的应用后，接好串口队列和节拍，再根据设备协议验证查询与控制。
+例程按功能展示调用方式。按需将通信、tick、轮询和指令片段接入已有应用，再根据设备协议验证查询与控制。
 
-Linux 用户可使用独立的 [at_linux_sample.c](../samples/at_linux_sample.c) 直接连接串口，先探测 AT，再执行查询或带参数指令。编译与运行方法见 [README](../README.md#linux-串口示例)。
+Linux 用户可参考 [at_linux_sample.c](../samples/at_linux_sample.c) 的通信和指令片段，接入顺序见 [README](../README.md#linux-串口示例)。

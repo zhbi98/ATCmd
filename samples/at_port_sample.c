@@ -1,15 +1,16 @@
 /**
  * @file at_port_sample.c
  * Provide memory allocation and the AT millisecond clock.
- * Compile this file OR another platform port, never both.
+ * Copy the needed functions into the application platform port.
  */
 
 /*********************
  *      INCLUDES
  *********************/
 
-#include "at_device_sample.h"
+#include "at_chat.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 
 /**********************

@@ -1,6 +1,6 @@
 # 命令接口参考
 
-本页用于查阅接口行为。第一次使用请先完成[驱动对接](porting.md)与[查询流程](usage.md)。声明见 [at_chat.h](../include/at_chat.h)，以下差异按当前 [at_chat.c](../src/at_chat.c) 实现说明。
+本页用于查阅接口行为。第一次使用请先完成[驱动对接](porting.md)与[查询流程](usage.md)。声明见 [at_chat.h](../include/at_chat.h)，以下行为按当前 [at_chat.c](../src/at_chat.c) 实现说明。
 
 ## 对象与请求
 

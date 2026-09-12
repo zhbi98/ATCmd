@@ -48,7 +48,7 @@ Additional documentation: [API Reference](./docs/api-reference.md) and [Advanced
 
 ### C Examples
 
-The following four C files can be included in an embedded application, without a main function, board template, or IDE project. The standalone Linux program is described below.
+`samples` demonstrates individual integration and usage steps. Adapt function bodies to your existing drivers, platform layer, and application; manage declarations in your own headers. Choose the clock and polling snippets for your target: bare metal, FreeRTOS, or Linux.
 
 | File | Contents |
 | --- | --- |
@@ -56,12 +56,16 @@ The following four C files can be included in an embedded application, without a
 | [at_port_sample.c](./samples/at_port_sample.c) | Memory allocation, release, and a millisecond clock |
 | [at_device_sample.c](./samples/at_device_sample.c) | Object initialization, ticks, and polling |
 | [at_commands_sample.c](./samples/at_commands_sample.c) | AT probing, address/baud queries, parameterized settings, and callbacks |
+| [at_freertos_sample.c](./samples/at_freertos_sample.c) | FreeRTOS tick hook and task polling |
+| [at_linux_sample.c](./samples/at_linux_sample.c) | Linux serial port, monotonic clock, object lifecycle, and commands |
 
 ### Integration Steps
 
-1. **Add the source files**
+These steps use the embedded `at_device_*` snippets. See [Linux Serial Example](#linux-serial-example) for the Linux interfaces.
 
-   Add the four C files above and `src/at_chat.c` to your application, with `include` and `samples` on the header search path. Public declarations are in [at_device_sample.h](./samples/at_device_sample.h). When using the sample port, do not also compile `src/at_port.c`, to avoid duplicate platform definitions.
+1. **Choose integration snippets**
+
+   Adapt the transport, clock, object, and command snippets to your application. Core interfaces are in `include/at_chat.h`; platform interfaces are in `include/at_port.h`.
 
 2. **Connect the transport**
 
@@ -84,7 +88,9 @@ The following four C files can be included in an embedded application, without a
 The system tick advances time; the main loop handles communication and callbacks. Connect both:
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+/* Include the application declarations for the at_device_* snippets. */
 
 /* Call from the existing 1 ms timer interrupt or system tick hook. */
 void app_tick_1ms(void)
@@ -116,11 +122,11 @@ Call `app_at_run()` from the application entry point after initializing the UART
 
 `at_device_process()` advances communication at a minimum interval of 5 ms and executes callbacks in the calling context. Keep it outside interrupts, and do not block a callback waiting for another command. With an RTOS, poll from one task and yield appropriately while the system tick updates time independently. Ensure atomic counter reads on the target, adding a critical section where necessary.
 
-The standalone Linux example reads `CLOCK_MONOTONIC` directly and does not call `at_device_tick_inc()`. Its loop in `at_wait_response()` calls `at_obj_process()` and uses `poll()` to wait for serial events.
+The Linux snippets read `CLOCK_MONOTONIC` directly, without `at_device_tick_inc()`. Call `at_linux_process()` repeatedly from your event loop or task to advance communication and timeouts.
 
 ### FreeRTOS Integration
 
-[at_freertos_sample.c](./samples/at_freertos_sample.c) demonstrates tick-hook timekeeping and polling from a dedicated task. Add it to the four embedded examples above. It converts the configured tick rate to milliseconds; merge existing tick hooks and avoid duplicate time updates. See [FreeRTOS integration](./docs/porting.md#freertos-tick-与任务对接) for configuration, task creation, and tickless idle limitations (Chinese).
+[at_freertos_sample.c](./samples/at_freertos_sample.c) demonstrates tick-hook timekeeping and polling from a dedicated task. Its `at_device_*` calls refer to the device and command snippets above. It converts the configured tick rate to milliseconds; merge existing tick hooks and avoid duplicate time updates. See [FreeRTOS integration](./docs/porting.md#freertos-tick-与任务对接) for configuration, task creation, and tickless idle limitations (Chinese).
 
 ### Querying and Controlling
 
@@ -169,25 +175,21 @@ bool app_set_baudrate(at_obj_t * device_p, uint32_t baudrate,
 
 ## Linux Serial Example
 
-[at_linux_sample.c](./samples/at_linux_sample.c) is a standalone command-line program with `main`, `termios` serial configuration, non-blocking Write/Read, a TX buffer, and a monotonic clock. Compile it only with the core file; exclude other examples and `src/at_port.c`.
+[at_linux_sample.c](./samples/at_linux_sample.c) demonstrates each part of Linux integration:
 
-Build from the repository root on Linux:
-
-```sh
-cc -std=gnu99 -Wall -Wextra -Iinclude src/at_chat.c samples/at_linux_sample.c -o at_linux_sample
-```
-
-| Operation | Command |
+| Part | Integration |
 | --- | --- |
-| Probe, then query device information (default: `ATI`) | `./at_linux_sample /dev/ttyUSB0 115200` |
-| Probe, then run a specific query | `./at_linux_sample /dev/ttyUSB0 115200 'AT+BAUD?'` |
-| Probe, then send `AT+OUTIO=1` | `./at_linux_sample /dev/ttyUSB0 115200 AT+OUTIO 1` |
+| Serial port | Adapt `at_linux_serial_open("/dev/ttyUSB0")`: raw, 8N1, 115200 baud, no flow control, non-blocking |
+| Write/Read | Copy complete writes, drain queued bytes with partial-write handling, and read available bytes |
+| Clock and memory | Adapt the monotonic clock and memory functions to your platform layer |
+| Object | Call `at_linux_init()` after driver setup and check the result |
+| Polling | Keep calling `at_linux_process()` from your event loop or task, even without received data |
+| Commands | Call `at_linux_query("AT")` first; after its successful callback, query `ATI` or call `at_linux_set_output(1U)` |
+| Cleanup | Stop other access, call `at_linux_deinit()`, and close the application's serial port |
 
-The third argument is the command text. With a fourth argument, the program sends `command=value`, accepting values from `0` to `UINT32_MAX`. CRLF is appended automatically; do not include line endings.
+Check serial setup and object initialization before submitting the probe. Call command and cleanup functions from your existing application flow. Keep the command string passed to `at_linux_query()` valid until completion.
 
-The serial port uses **8N1 with no flow control**, supporting 9600, 19200, 38400, 57600, 115200, and 230400 baud. Replace the device path, ensure your user has read/write access to the port, and select commands from the device manual.
-
-The program sends `AT` first and executes the selected command only after success. Each request waits for `OK`, with a 2-second timeout and no retries. Callbacks print result codes and response data. Exit status is `0` on success and nonzero on failure or interruption. Press `Ctrl+C` to exit; cleanup releases the object and restores the original host serial settings. If a command changes the device baud rate, use its new baud rate for subsequent connections.
+On `io_failed`, stop submitting requests and let the application recover from the transport or clock error. Use `poll()` with a short timeout in the event loop to avoid busy waiting. A command submission returning `true` only means queued; handle device results in its callback. The Linux command snippets wait for `OK`, with a 2000 ms timeout and no retries. Adapt commands to the device protocol.
 
 ## Integration Checks
 
@@ -200,7 +202,7 @@ The program sends `AT` first and executes the selected command only after succes
 
 The examples use a single execution context without locks. See [Advanced Usage](./docs/advanced-usage.md) for multitasking and URC configuration.
 
-Before calling `at_device_deinit()`, stop all other access to the device object; destruction does not invoke completion callbacks for pending requests.
+Before calling the corresponding `at_device_deinit()` or `at_linux_deinit()`, stop all other access to the device object; destruction does not invoke completion callbacks for pending requests.
 
 ## License
 

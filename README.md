@@ -46,7 +46,7 @@ AT-client-cmd 是一个异步 AT 命令通信组件，适用于 Modem、Wi-Fi、
 
 ### C 例程
 
-以下四个 C 文件可加入嵌入式应用，不包含 `main`、板级模板或 IDE 工程。Linux 独立程序见下方说明。
+`samples` 按功能展示对接与使用方法。将需要的片段放入已有驱动、平台层和业务代码，函数声明由应用自己的头文件管理。裸机、FreeRTOS 和 Linux 的时钟及轮询方式按目标平台选用。
 
 | 文件 | 内容 |
 | --- | --- |
@@ -54,12 +54,16 @@ AT-client-cmd 是一个异步 AT 命令通信组件，适用于 Modem、Wi-Fi、
 | [at_port_sample.c](./samples/at_port_sample.c) | 内存分配、释放与毫秒时钟 |
 | [at_device_sample.c](./samples/at_device_sample.c) | 对象初始化、节拍和轮询 |
 | [at_commands_sample.c](./samples/at_commands_sample.c) | AT 探测、地址与波特率查询、带参数设置和回调 |
+| [at_freertos_sample.c](./samples/at_freertos_sample.c) | FreeRTOS tick 钩子与任务轮询 |
+| [at_linux_sample.c](./samples/at_linux_sample.c) | Linux 串口、单调时钟、对象管理和指令调用 |
 
 ### 接入步骤
 
-1. **添加源文件**
+以下步骤使用嵌入式 `at_device_*` 片段；Linux 对应接口见 [Linux 串口示例](#linux-串口示例)。
 
-   将上述四个 C 文件与 `src/at_chat.c` 加入工程，头文件路径添加 `include` 和 `samples`。公共声明见 [at_device_sample.h](./samples/at_device_sample.h)。使用示例平台文件时不要同时编译 `src/at_port.c`，避免重复定义平台接口。
+1. **选择接入片段**
+
+   根据平台选择通信、时钟、对象和指令片段，将对应逻辑接入应用。核心接口见 `include/at_chat.h`，平台接口见 `include/at_port.h`。
 
 2. **对接通信接口**
 
@@ -82,7 +86,9 @@ AT-client-cmd 是一个异步 AT 命令通信组件，适用于 Modem、Wi-Fi、
 系统节拍负责更新时间，主循环负责通信和回调，两处都需要接入：
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+/* Include the application declarations for the at_device_* snippets. */
 
 /* Call from the existing 1 ms timer interrupt or system tick hook. */
 void app_tick_1ms(void)
@@ -114,11 +120,11 @@ bool app_at_run(void)
 
 `at_device_process()` 内部至少间隔 5 ms 推进一次通信；回调也在该调用中执行，不能放进中断，也不能在回调中阻塞等待另一条指令。RTOS 中由一个任务轮询并适当让出 CPU，系统 tick 独立更新计时。目标平台需保证计数器读取原子性，必要时增加临界区。
 
-Linux 独立例程直接通过 `CLOCK_MONOTONIC` 取时间，无需调用 `at_device_tick_inc()`；其循环在 `at_wait_response()` 中调用 `at_obj_process()` 并通过 `poll()` 等待串口事件。
+Linux 片段通过 `CLOCK_MONOTONIC` 取时间，无需调用 `at_device_tick_inc()`；将 `at_linux_process()` 接入已有事件循环或任务，并持续调用以推进收发和超时。
 
 ### FreeRTOS 接入
 
-[at_freertos_sample.c](./samples/at_freertos_sample.c) 演示 tick 钩子计时与独立任务轮询，与上述四个嵌入式例程一起使用。支持按实际 tick 频率换算毫秒；已有 tick 钩子需合并，避免重复计时。配置、任务创建和 tickless idle 限制见 [FreeRTOS 对接说明](./docs/porting.md#freertos-tick-与任务对接)。
+[at_freertos_sample.c](./samples/at_freertos_sample.c) 演示 tick 钩子计时与独立任务轮询，其中 `at_device_*` 调用对应设备和指令片段。支持按实际 tick 频率换算毫秒；已有 tick 钩子需合并，避免重复计时。配置、任务创建和 tickless idle 限制见 [FreeRTOS 对接说明](./docs/porting.md#freertos-tick-与任务对接)。
 
 ### 查询与控制
 
@@ -167,25 +173,21 @@ bool app_set_baudrate(at_obj_t * device_p, uint32_t baudrate,
 
 ## Linux 串口示例
 
-[at_linux_sample.c](./samples/at_linux_sample.c) 是独立的命令行程序，包含 `main`、`termios` 串口配置、非阻塞 Write/Read、发送缓冲区和单调时钟。仅与核心文件编译，不要同时加入其他例程或 `src/at_port.c`。
+[at_linux_sample.c](./samples/at_linux_sample.c) 按功能展示 Linux 接入方法：
 
-在 Linux 的仓库根目录编译：
-
-```sh
-cc -std=gnu99 -Wall -Wextra -Iinclude src/at_chat.c samples/at_linux_sample.c -o at_linux_sample
-```
-
-| 操作 | 运行命令 |
+| 部分 | 如何接入 |
 | --- | --- |
-| 探测后查询设备信息（默认 `ATI`） | `./at_linux_sample /dev/ttyUSB0 115200` |
-| 探测后执行指定查询 | `./at_linux_sample /dev/ttyUSB0 115200 'AT+BAUD?'` |
-| 探测后发送 `AT+OUTIO=1` | `./at_linux_sample /dev/ttyUSB0 115200 AT+OUTIO 1` |
+| 串口 | 参考 `at_linux_serial_open("/dev/ttyUSB0")`，配置 raw、8N1、115200、无流控和非阻塞模式 |
+| Write/Read | 写入时复制完整数据，循环中发送队列处理部分写入；读取已有字节 |
+| 时钟与内存 | 将单调时钟和内存函数放入应用平台层 |
+| 对象 | 驱动就绪后调用 `at_linux_init()`，检查创建结果 |
+| 轮询 | 在已有事件循环或任务中持续调用 `at_linux_process()`，即使没有收到数据也要调用 |
+| 指令 | 先调用 `at_linux_query("AT")`，成功回调后再查询 `ATI` 或调用 `at_linux_set_output(1U)` |
+| 清理 | 停止其他访问后调用 `at_linux_deinit()`，串口关闭由应用负责 |
 
-第三个参数为命令文本；提供第四个参数时，程序以 `命令=数值` 格式发送，数值范围为 `0`～`UINT32_MAX`。命令自动追加 CRLF，不要自行添加换行。
+先检查串口打开与对象初始化结果，再提交探测；发送、查询和清理函数都由已有应用流程调用。`at_linux_query()` 的命令字符串需保持有效直到请求完成。
 
-串口使用 **8N1、无流控**，支持 9600、19200、38400、57600、115200 和 230400 波特率。替换设备路径，确保当前用户具有串口读写权限，并按设备手册选择指令。
-
-程序先发送 `AT`，成功后才执行指定指令；每条请求等待 `OK`，超时 2 秒，不自动重试。回调打印结果码和响应内容，成功退出码为 `0`，失败或中断为非零。按 `Ctrl+C` 可退出，退出时释放对象并恢复主机原串口配置。若发送修改设备波特率的指令，后续连接需使用设备的新波特率。
+`io_failed` 表示底层通信或时钟异常，应用应停止提交请求并处理恢复。事件循环可用带短超时的 `poll()` 等待，避免空转。指令提交函数返回 `true` 仅代表入队成功；设备结果在回调中处理。Linux 指令片段等待 `OK`，超时 2000 ms，不自动重试；具体指令按设备协议调整。
 
 ## 接入检查
 
@@ -198,7 +200,7 @@ cc -std=gnu99 -Wall -Wextra -Iinclude src/at_chat.c samples/at_linux_sample.c -o
 
 例程采用单一执行上下文，未配置锁；多任务接入与 URC 配置见 [进阶功能](./docs/advanced-usage.md)。
 
-停用设备时，先停止其他访问，再调用 `at_device_deinit()`；销毁对象不会为未完成请求触发完成回调。
+停用设备时，先停止其他访问，再调用对应的 `at_device_deinit()` 或 `at_linux_deinit()`；销毁对象不会为未完成请求触发完成回调。
 
 ## 许可证
 

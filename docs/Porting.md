@@ -4,11 +4,11 @@
 
 查询和控制指令在[下一篇](usage.md)实现，避免把硬件接入和业务解析混在一起。
 
-Linux 用户可直接运行独立的 [at_linux_sample.c](../samples/at_linux_sample.c)，编译与运行方法见 [README](../README.md#linux-串口示例)。该文件自带入口与平台实现，不要与下述嵌入式例程一起链接。
+Linux 用户可参考 [at_linux_sample.c](../samples/at_linux_sample.c) 中的串口、时钟和指令片段，接入顺序见 [README](../README.md#linux-串口示例)。
 
-## 第一步：把文件加入工程
+## 第一步：选择需要的接入片段
 
-需要编译以下内容：
+按功能查阅以下实现，并将需要的逻辑放入应用对应模块：
 
 | 文件 | 作用 |
 | --- | --- |
@@ -19,28 +19,36 @@ Linux 用户可直接运行独立的 [at_linux_sample.c](../samples/at_linux_sam
 | `samples/at_commands_sample.c` | 蓝牙查询、控制指令及结果回调 |
 | 你的驱动源文件 | 实际串口初始化、发送和接收队列 |
 
-头文件搜索路径添加 `include` 和 `samples`。示例的接口声明在 [at_device_sample.h](../samples/at_device_sample.h)。
+例程按接口职责组织。先选择目标平台的时钟与轮询方式，再将通信、对象和业务片段接入已有应用。跨片段函数由应用头文件声明。
+
+| 平台 | 时间来源 | 轮询位置 |
+| --- | --- | --- |
+| 裸机 | 定时中断调用 `at_device_tick_inc()` | 主循环调用 `at_device_process()` |
+| FreeRTOS | tick 钩子按频率换算毫秒 | 一个任务调用 `at_device_process()` |
+| Linux | `clock_gettime(CLOCK_MONOTONIC)` | 事件循环或任务调用 `at_linux_process()` |
 
 核心使用 C99 特性和 GNU 扩展，使用 GCC 时可选择 `-std=gnu99`。非 GCC 工具链需要确认相应语法支持。
 
-只链接一份 `at_malloc`、`at_free`、`at_get_ms` 实现。仓库的 `src/at_port.c` 是参考实现，其中 `get_tick()` 需要目标平台提供；使用 `samples/at_port_sample.c` 时，不要再把它加入工程。
+平台层提供 `at_malloc`、`at_free`、`at_get_ms`。可参考 `at_port_sample.c` 的实现，并替换为应用使用的内存与时钟接口。
 
 ## 第二步：提供内存和时钟
 
-裸机示例已经提供毫秒计数器。[at_port_sample.c](../samples/at_port_sample.c) 已用标准分配器并将核心时钟接到该计数器，下面是文件中的实现，无需重复定义：
+裸机示例已经提供毫秒计数器。[at_port_sample.c](../samples/at_port_sample.c) 已用标准分配器并将核心时钟接到该计数器，下面展示对应实现：
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+/* Include the application declarations for the at_device_* snippets. */
 #include <stdlib.h>
 
-void *at_malloc(unsigned int size)
+void * at_malloc(unsigned int size)
 {
     return malloc(size);
 }
 
-void at_free(void *memory)
+void at_free(void * memory_p)
 {
-    free(memory);
+    free(memory_p);
 }
 
 unsigned int at_get_ms(void)
@@ -53,7 +61,7 @@ unsigned int at_get_ms(void)
 
 读取节拍需要在目标 CPU 上可靠；较窄位宽的平台可能需要临界区保护。不要把 AT 协议轮询放入节拍中断，只在中断中更新时间。
 
-如果使用操作系统自己的时钟，应返回单调推进的毫秒计数。应使用单调时钟，避免系统校时影响超时判断。内存分配器需要满足平台的对齐和并发要求。
+如果使用操作系统自己的时钟，应返回单调推进的毫秒计数，避免系统校时影响超时判断。同步调整 `at_device_get_tick()`，让轮询节拍和框架超时使用同一时间来源。内存分配器需要满足平台的对齐和并发要求。
 
 ## 第三步：连接真实设备的收发驱动
 
@@ -66,26 +74,36 @@ unsigned int at_get_ms(void)
 接收：设备 → 中断或 DMA → 驱动接收队列 → read → AT 框架
 ```
 
-已有的串口发送和接收队列可以封装在板级接口中。[at_transport_sample.c](../samples/at_transport_sample.c) 已提供下面的包装。应用实现 `board_uart_tx_enqueue` 和 `board_uart_rx_dequeue` 即可，不要再重复定义 `at_device_write` 和 `at_device_read`：
+已有的串口发送和接收队列可以封装在板级接口中。[at_transport_sample.c](../samples/at_transport_sample.c) 展示驱动包装方式。下面使用核心适配器要求的 `unsigned int` 签名：将 `board_uart_tx_enqueue` 和 `board_uart_rx_dequeue` 替换为实际驱动接口，包装方式如下：
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
 
-extern unsigned int board_uart_tx_enqueue(const void *data, unsigned int len);
-extern unsigned int board_uart_rx_dequeue(void *data, unsigned int len);
+#include <stddef.h>
 
-unsigned int at_device_write(const void *data, unsigned int len)
+/* Include the application declarations for the at_device_* snippets. */
+
+extern unsigned int board_uart_tx_enqueue(const void * data_p, unsigned int len);
+extern unsigned int board_uart_rx_dequeue(void * data_p, unsigned int len);
+
+unsigned int at_device_write(const void * data_p, unsigned int len)
 {
-    return board_uart_tx_enqueue(data, len);
+    if (data_p == NULL || len == 0) {
+        return 0;
+    }
+    return board_uart_tx_enqueue(data_p, len);
 }
 
-unsigned int at_device_read(void *data, unsigned int len)
+unsigned int at_device_read(void * data_p, unsigned int len)
 {
-    return board_uart_rx_dequeue(data, len);
+    if (data_p == NULL || len == 0) {
+        return 0;
+    }
+    return board_uart_rx_dequeue(data_p, len);
 }
 ```
 
-核心适配器的读写签名使用 `unsigned int`，因此这里保持与 `at_adapter_t` 一致；不能因为业务参数使用 `uint32_t`，就直接改变函数指针要求的类型。
+核心适配器的读写签名使用 `unsigned int`，因此这里保持与 `at_adapter_t` 一致；不能因为业务参数使用 `uint32_t`，就直接改变函数指针要求的类型。收发例程中的 `uint32_t` 写法要求目标平台将其定义为 `unsigned int`；若底层类型不同，应按核心签名调整包装函数。
 
 这两个驱动接口应满足以下约定：
 
@@ -100,7 +118,7 @@ unsigned int at_device_read(void *data, unsigned int len)
 
 ## 第四步：检查适配器配置
 
-[设备示例](../samples/at_device_sample.c) 已定义常驻适配器，绑定上述收发函数，响应缓冲区为 256 字节。无需再创建第二个适配器或对象。
+[设备片段](../samples/at_device_sample.c) 展示常驻适配器如何绑定上述收发函数，响应缓冲区为 256 字节。将适配器和对象保存在应用的设备模块中。
 
 | 配置 | 接入时的选择 |
 | --- | --- |
@@ -121,7 +139,9 @@ unsigned int at_device_read(void *data, unsigned int len)
 系统节拍负责更新时间，主循环负责通信和回调，两处都需要接入：
 
 ```c
-#include "at_device_sample.h"
+#include "at_chat.h"
+
+/* Include the application declarations for the at_device_* snippets. */
 
 /* Call from the existing 1 ms timer interrupt or system tick hook. */
 void app_tick_1ms(void)
@@ -153,15 +173,15 @@ bool app_at_run(void)
 
 `at_device_process()` 内部至少间隔 5 ms 推进一次通信；回调也在该调用中执行，不能放进中断，也不能在回调中阻塞等待另一条指令。RTOS 中由一个任务轮询并适当让出 CPU，系统 tick 独立更新计时。目标平台需保证计数器读取原子性，必要时增加临界区。
 
-[Linux 独立例程](../samples/at_linux_sample.c)直接通过 `CLOCK_MONOTONIC` 取时间，无需调用 `at_device_tick_inc()`；其循环在 `at_wait_response()` 中调用 `at_obj_process()` 并通过 `poll()` 等待串口事件。
+Linux 片段直接通过 `CLOCK_MONOTONIC` 取时间，无需调用 `at_device_tick_inc()`；将 `at_linux_process()` 接入应用事件循环，持续推进通信与超时。
 
 不要再对同一对象调用另一套并发轮询。当前流程采用单执行上下文，其他任务有请求时可以通过应用消息队列交给该上下文提交。
 
-[at_commands_sample.c](../samples/at_commands_sample.c) 已提供 `at_device_on_response` 业务回调，可按[接收与处理结果](usage.md#接收与处理结果)修改其中的解析与通知逻辑，无需在另一个文件重复定义。
+[at_commands_sample.c](../samples/at_commands_sample.c) 展示 `at_device_on_response` 业务回调，可按[接收与处理结果](usage.md#接收与处理结果)将解析与通知逻辑接入应用。
 
 ## FreeRTOS tick 与任务对接
 
-[at_freertos_sample.c](../samples/at_freertos_sample.c) 与前述四个嵌入式 C 文件一起使用，由一个任务负责 AT 初始化、指令提交和轮询。保留 `at_port_sample.c` 的 `at_get_ms()`，不要同时链接 Linux 例程或 `src/at_port.c`。
+[at_freertos_sample.c](../samples/at_freertos_sample.c) 展示 tick 钩子和 AT 任务体，内部调用对应设备与指令片段。将钩子合入已有系统钩子，将任务体接入应用；平台层的 `at_get_ms()` 从设备毫秒计数器取时间。
 
 在已有 `FreeRTOSConfig.h` 中设置：
 
@@ -203,7 +223,7 @@ BaseType_t app_at_task_create(configSTACK_DEPTH_TYPE stack_depth,
 
 先等待 `ready` 成功回调，再在该任务上下文提交设备操作。其他任务通过应用消息队列发送操作请求；当前例程没有配置框架锁。初始化或探测入队失败时，该任务结束，可按应用需要增加错误上报。
 
-此方案适用于单核、持续 tick 的配置，并要求平台能原子读取 32 位计数器。启用 tickless idle 时，被抑制的 tick 不会逐个调用该钩子，因此例程通过编译检查拒绝该配置；需要低功耗时应改用休眠期间仍可靠计时的单调时钟，并同步替换 `at_device_get_tick()` 的时间来源，保证轮询节拍和框架超时使用同一时钟。不要仅替换 `at_get_ms()` 而留下不再更新的设备计数器。
+此方案适用于单核、持续 tick 的配置，并要求平台能原子读取 32 位计数器。启用 tickless idle 时，被抑制的 tick 不会逐个调用该钩子，因此该钩子计时方式不适用；需要低功耗时应改用休眠期间仍可靠计时的单调时钟，并同步替换 `at_device_get_tick()` 的时间来源，保证轮询节拍和框架超时使用同一时钟。不要仅替换 `at_get_ms()` 而留下不再更新的设备计数器。
 
 ## 如何确认驱动已经接通
 
