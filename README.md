@@ -15,7 +15,7 @@ AT-client-cmd 是一个异步 AT 命令通信组件，适用于 Modem、Wi-Fi、
 应用处理回调 ← 响应匹配与超时处理 ← Read ← 设备
 ```
 
-每个 AT 对象绑定一组通信接口，按顺序执行请求。等待响应期间，应用可以继续处理其他任务，但必须持续调用轮询接口。设备主动发送的 URC（非请求响应消息）可交给独立的处理表。
+每个 AT 对象绑定一组通信接口，按顺序执行请求。等待响应期间，应用可以继续处理其他任务，但必须持续调用轮询接口。设备主动发送的 URC（Unsolicited Result Code，非请求结果码）可交给独立的处理表。
 
 框架负责通信调度；具体指令、响应格式及设备业务逻辑由应用定义。
 
@@ -54,6 +54,7 @@ AT-client-cmd 是一个异步 AT 命令通信组件，适用于 Modem、Wi-Fi、
 | [at_port_sample.c](./samples/at_port_sample.c) | 内存分配、释放与毫秒时钟 |
 | [at_device_sample.c](./samples/at_device_sample.c) | 对象初始化、节拍和轮询 |
 | [at_commands_sample.c](./samples/at_commands_sample.c) | AT 探测、地址与波特率查询、带参数设置和回调 |
+| [at_urc_sample.c](./samples/at_urc_sample.c) | `+IM_READY` 启动通知、数值上报和 URC 注册 |
 | [at_freertos_sample.c](./samples/at_freertos_sample.c) | FreeRTOS tick 钩子与任务轮询 |
 | [at_linux_sample.c](./samples/at_linux_sample.c) | Linux 串口、单调时钟、对象管理和指令调用 |
 

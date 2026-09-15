@@ -56,6 +56,7 @@ Additional documentation: [API Reference](./docs/api-reference.md) and [Advanced
 | [at_port_sample.c](./samples/at_port_sample.c) | Memory allocation, release, and a millisecond clock |
 | [at_device_sample.c](./samples/at_device_sample.c) | Object initialization, ticks, and polling |
 | [at_commands_sample.c](./samples/at_commands_sample.c) | AT probing, address/baud queries, parameterized settings, and callbacks |
+| [at_urc_sample.c](./samples/at_urc_sample.c) | `+IM_READY` startup notification, numeric reports, and URC registration |
 | [at_freertos_sample.c](./samples/at_freertos_sample.c) | FreeRTOS tick hook and task polling |
 | [at_linux_sample.c](./samples/at_linux_sample.c) | Linux serial port, monotonic clock, object lifecycle, and commands |
 

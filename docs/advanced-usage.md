@@ -54,34 +54,58 @@ bool submit_custom_query(at_obj_t *at, void *params)
 
 ## URC 消息处理
 
-启用 `AT_URC_WARCH_EN`，给对象配置非零 `urc_bufsize`，再注册长期有效的订阅表。每项指定前缀、结束字符和处理函数：
+URC（Unsolicited Result Code，非请求结果码）是模组主动发送的事件通知，不需要主机先提交查询。概念、响应对比和消息样式见[设备主动上报的消息](architecture.md#设备主动上报的消息)。本节说明如何注册与处理。
 
-```c
-#include "at_chat.h"
-#include <stdio.h>
+### 注册与处理
 
-#if AT_URC_WARCH_EN
-static int power_report(at_urc_info_t *info)
-{
-    int value;
-    if (info->status == URC_RECV_OK &&
-        sscanf(info->urcbuf, "+POWER:%d", &value) == 1) {
-        printf("power=%d\n", value);
-    }
-    return 0;
-}
+[at_urc_sample.c](../samples/at_urc_sample.c) 提供可移入应用的 URC 片段：
 
-void register_power_report(at_obj_t *at)
-{
-    static const urc_item_t table[] = {
-        {.prefix = "+POWER:", .endmark = '\n', .handler = power_report},
-    };
-    at_obj_set_urc(at, table, (int)(sizeof(table) / sizeof(table[0])));
-}
-#endif
-```
+| 接口或处理函数 | 用途 |
+| --- | --- |
+| `at_urc_register(device_p)` | 给已创建的对象注册常驻订阅表 |
+| `at_urc_reset_ready()` | 模组每次上电或复位前清除旧的就绪状态 |
+| `at_urc_is_ready()` | 在轮询上下文读取启动通知状态 |
+| `at_urc_process(device_p)` | 持续轮询，收到启动通知后只提交一次 `ATI` 查询 |
+| `at_ready_report()` | 验证完整的 `+IM_READY` 行并更新状态 |
+| `at_power_report()` | 解析示意消息 `+POWER:80`，本例限定数值为 0～100 |
+
+启用 `AT_URC_WARCH_EN`，在创建对象前给适配器设置非零 `urc_bufsize`（例如 128 字节），然后调用 `at_urc_register(device_p)`。保持同一上下文持续轮询即可，无需新增 URC 任务。
+
+其他任务需要获知状态时，由回调通过应用事件或消息队列通知。
+
+例程按 `urclen` 读取数据，处理结束返回 `0`。`+POWER` 的名称、范围和业务含义均为示意，需按模组手册调整；收到格式不匹配、超范围或未完成的消息时，不更新业务状态。
 
 结束字符应在 `AT_URC_END_MARKS` 中。解析器按表顺序采用第一个子串前缀匹配项，订阅规则要避免相互包含或过于模糊。
+
+### 上电通知：`+IM_READY`
+
+假设模组实际发送 `+IM_READY\r\n`，订阅项应设置 `.prefix = "+IM_READY"`、`.endmark = '\n'`，并绑定启动通知处理函数。在处理函数中检查 `info_p->status == URC_RECV_OK`，再更新业务就绪标志或发送事件通知，最后返回 `0` 表示本条消息处理完成。
+
+接入时按以下顺序安排：
+
+1. 初始化主机串口并开启接收缓冲。
+2. 在适配器中配置非零 `urc_bufsize`，再创建 AT 对象，通过 `at_urc_register(device_p)` 注册订阅表。
+3. 清除业务就绪标志，再给模组上电或复位。
+4. 持续轮询，在 URC 回调中处理启动通知。
+
+设备例程的 `urc_bufsize` 默认为 `0`，使用此功能时应设置适合消息长度的容量，例如 128 字节，并保持 `AT_URC_WARCH_EN` 开启。
+
+回调在轮询上下文中执行，应及时返回；需要保留的消息内容要在回调中复制。
+
+如果模组已上电且启动消息没有被串口缓冲保存，框架无法补抓；应在应用中安排就绪确认或重新启动流程。若消息没有 `\n`，以上结束规则不会触发，应按真实协议调整。
+
+### 就绪状态与后续查询
+
+例程通过 `module_ready` 衔接启动通知与设备查询：
+
+1. 复位前调用 `at_urc_reset_ready()`，清除旧的就绪状态和查询提交标志。
+2. 循环中先轮询，让框架接收并处理 `+IM_READY`。
+3. 就绪后提交一次 `ATI`，入队失败可在下一轮重试，入队成功后不重复提交。
+4. 在 `at_startup_response()` 中处理查询结果。
+
+已有轮询循环时，只取就绪判断和提交片段放在原轮询后，避免重复轮询。Linux 应保留 `at_linux_process()` 的发送队列处理，FreeRTOS 应保留任务延时。
+
+使用启动通知作为就绪条件时，先等待 `+IM_READY`，再提交设备操作；不要同时沿用初始化后立即发送探测的流程。模组再次复位前应先协调结束旧请求，再清除状态。
 
 ### 不定长度 URC
 
